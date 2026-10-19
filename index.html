@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#16181c">
+  <meta name="description" content="Тренажёр парковки с траекториями движения как в камерах 360°: реальные габариты и радиус разворота автомобиля, препятствия, редактор сцен.">
+  <title>Ассистент парковки</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2316181c'/%3E%3Cpath d='M22 50V14h12a11 11 0 0 1 0 22H22' fill='none' stroke='%2322d3ee' stroke-width='7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="app">
+  <aside id="panel" aria-label="Настройки">
+    <header class="brand">
+      <div class="logo">P</div>
+      <div>
+        <h1>Ассистент парковки</h1>
+        <p>траектории как в камерах 360°</p>
+      </div>
+      <button class="icon-btn only-mobile" id="panelClose" aria-label="Закрыть панель">✕</button>
+    </header>
+
+    <div class="seg" role="tablist" id="modeSeg">
+      <button data-mode="drive" class="on">Вождение</button>
+      <button data-mode="edit">Редактор</button>
+    </div>
+
+    <section>
+      <h2>Сцена</h2>
+      <label class="field">Упражнение
+        <select id="sceneSel"></select>
+      </label>
+      <label class="field">Сложность
+        <select id="levelSel">
+          <option value="easy">Просторно</option>
+          <option value="normal" selected>Обычно</option>
+          <option value="hard">Тесно</option>
+        </select>
+      </label>
+      <div class="row">
+        <button id="resetBtn" class="btn">↺ В начало</button>
+        <button id="undoBtn" class="btn" title="Backspace">⤺ Отменить манёвр</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>Автомобиль</h2>
+      <label class="field">Модель
+        <select id="carSel"></select>
+      </label>
+      <details id="carDetails">
+        <summary>Габариты и рулевое</summary>
+        <div class="grid2" id="carFields"></div>
+        <dl class="derived" id="carDerived"></dl>
+      </details>
+      <label class="field inline">Цвет <input type="color" id="carColor" value="#2563eb"></label>
+    </section>
+
+    <section>
+      <h2>Подсказки</h2>
+      <div class="toggles" id="toggles"></div>
+      <label class="field">Длина прогноза: <b id="lenVal"></b>
+        <input type="range" id="lenRange" min="1" max="15" step="0.5">
+      </label>
+    </section>
+
+    <section>
+      <h2>Управление</h2>
+      <label class="field">Макс. скорость: <b id="spdVal"></b>
+        <input type="range" id="spdRange" min="1" max="15" step="1">
+      </label>
+      <label class="field">Скорость вращения руля: <b id="strVal"></b>
+        <input type="range" id="strRange" min="90" max="900" step="30">
+      </label>
+      <label class="check"><input type="checkbox" id="autoCenter"> Самовозврат руля в движении</label>
+    </section>
+
+    <section>
+      <h2>Сохранение</h2>
+      <div class="row">
+        <button id="shareBtn" class="btn">🔗 Ссылка</button>
+        <button id="exportBtn" class="btn">⭳ Экспорт</button>
+        <label class="btn file">⭱ Импорт<input type="file" id="importInp" accept=".json,application/json" hidden></label>
+      </div>
+    </section>
+
+    <section class="help">
+      <h2>Клавиши</h2>
+      <ul>
+        <li><kbd>W</kbd>/<kbd>↑</kbd> вперёд, <kbd>S</kbd>/<kbd>↓</kbd> назад</li>
+        <li><kbd>A</kbd>/<kbd>←</kbd>, <kbd>D</kbd>/<kbd>→</kbd> руль, <kbd>C</kbd> руль прямо</li>
+        <li><kbd>Пробел</kbd> тормоз, <kbd>Shift</kbd> медленно</li>
+        <li><kbd>Backspace</kbd> отменить манёвр, <kbd>V</kbd> вид, <kbd>F</kbd> вписать</li>
+        <li>Колесо мыши / щипок — масштаб, перетаскивание — сдвиг</li>
+      </ul>
+      <p class="muted">Редактор: <kbd>Q</kbd>/<kbd>E</kbd> поворот, <kbd>Del</kbd> удалить, <kbd>Ctrl+D</kbd> копия, стрелки — сдвиг.</p>
+    </section>
+  </aside>
+
+  <main id="stage">
+    <canvas id="view" aria-label="Вид сверху на парковку"></canvas>
+
+    <div id="hud">
+      <div class="chip gear" id="hudGear">D</div>
+      <div class="chip"><span>км/ч</span><b id="hudSpeed">0</b></div>
+      <div class="chip"><span>руль</span><b id="hudWheel">0°</b></div>
+      <div class="chip"><span>колёса</span><b id="hudSteer">0°</b></div>
+      <div class="chip"><span>радиус</span><b id="hudRadius">∞</b></div>
+      <div class="chip dist" id="hudDistChip"><span>до препятствия</span><b id="hudDist">—</b></div>
+    </div>
+    <div id="stats">
+      <span id="stGoal"></span>
+      <span>манёвры <b id="stMan">0</b></span>
+      <span>касания <b id="stHit">0</b></span>
+      <span>время <b id="stTime">0:00</b></span>
+    </div>
+
+    <div id="viewBtns">
+      <button class="icon-btn only-mobile" id="panelOpen" aria-label="Настройки">☰</button>
+      <button class="icon-btn" id="viewMode" title="Вид (V)">🗺</button>
+      <button class="icon-btn" id="fitBtn" title="Вписать (F)">⤢</button>
+      <button class="icon-btn" id="zoomIn" title="Приблизить">＋</button>
+      <button class="icon-btn" id="zoomOut" title="Отдалить">－</button>
+    </div>
+
+    <div id="editBar" hidden>
+      <div class="tools" id="tools"></div>
+      <div class="props" id="props" hidden>
+        <div class="props-title" id="propsTitle"></div>
+        <div class="grid3" id="propsFields"></div>
+        <div class="row">
+          <button class="btn" id="dupBtn">⧉ Копия</button>
+          <button class="btn danger" id="delBtn">🗑 Удалить</button>
+        </div>
+      </div>
+      <div class="row edit-actions">
+        <button class="btn" id="clearBtn">Очистить сцену</button>
+        <button class="btn primary" id="doneBtn">Готово — ехать</button>
+      </div>
+    </div>
+
+    <div id="controls">
+      <div id="wheelWrap">
+        <svg id="wheel" viewBox="-60 -60 120 120" aria-label="Руль: перетащите по кругу">
+          <circle r="52" class="rim"/>
+          <circle r="52" class="rim-hi"/>
+          <path d="M-46 6 L-14 10 L-10 22 L10 22 L14 10 L46 6" class="spoke"/>
+          <path d="M0 22 L0 46" class="spoke"/>
+          <circle r="15" class="hub"/>
+          <rect x="-4" y="-56" width="8" height="10" rx="2" class="mark"/>
+        </svg>
+        <div id="wheelVal">0°</div>
+      </div>
+      <div id="pedals">
+        <button class="pedal fwd" data-drive="1">▲<small>Вперёд</small></button>
+        <button class="pedal brake" data-brake="1">■<small>Стоп</small></button>
+        <button class="pedal rev" data-drive="-1">▼<small>Назад</small></button>
+      </div>
+    </div>
+
+    <div id="toast" role="status" aria-live="polite"></div>
+
+    <div id="success" hidden>
+      <div class="card">
+        <div class="big">✓</div>
+        <h3 id="sucTitle">Припарковано!</h3>
+        <dl id="sucStats"></dl>
+        <div class="row">
+          <button class="btn" id="sucContinue">Продолжить</button>
+          <button class="btn primary" id="sucAgain">Ещё раз</button>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="js/geometry.js"></script>
+<script src="js/vehicles.js"></script>
+<script src="js/car.js"></script>
+<script src="js/world.js"></script>
+<script src="js/scenarios.js"></script>
+<script src="js/trajectory.js"></script>
+<script src="js/sensors.js"></script>
+<script src="js/renderer.js"></script>
+<script src="js/editor.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
