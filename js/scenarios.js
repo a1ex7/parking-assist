@@ -19,11 +19,14 @@ PA.scenarios = (function () {
     };
   }
 
+  /** Припаркованная машина случайного кузова с правдоподобными габаритами. */
   function makeCar(r, x, y, a, opts = {}) {
+    const style = ['sedan', 'hatch', 'suv', 'sedan', 'suv', 'hatch', 'van'][Math.floor(r() * 7)];
+    const dims = { sedan: [4.5, 0.45, 1.76, 0.12], hatch: [4.05, 0.35, 1.74, 0.1], suv: [4.4, 0.5, 1.82, 0.12], van: [4.9, 0.3, 1.9, 0.06] }[style];
     return {
-      type: 'car', x, y, a,
-      w: opts.len || 4.3 + r() * 0.6,
-      h: opts.wid || 1.74 + r() * 0.16,
+      type: 'car', x, y, a, style,
+      w: opts.len || dims[0] + r() * dims[1],
+      h: opts.wid || dims[2] + r() * dims[3],
       color: CAR_COLORS[Math.floor(r() * CAR_COLORS.length)],
     };
   }
@@ -70,7 +73,8 @@ PA.scenarios = (function () {
   /** Ряд перпендикулярных мест: заезд задом (или передом). */
   function perpendicular(spec, lv, pillars) {
     const r = rng(23);
-    const W = spec.width + lv.perp + (pillars ? 0.25 : 0);
+    // колонна 0.5 м стоит на линии между местами — чистый проём между колоннами как у обычного места
+    const W = spec.width + lv.perp + (pillars ? 0.5 : 0);
     const D = Math.max(5.0, spec.length + 0.5);
     const o = [];
     o.push(obj('curb', 0, D + 0.075, 60, 0.15));
@@ -174,6 +178,24 @@ PA.scenarios = (function () {
     };
   }
 
+  /** Машина стоит у стены: зеркало в 2 см от неё, спереди тесно стоит другая — выехать, не задев стену кормой. */
+  function wallExit(spec, lv) {
+    const r = rng(71);
+    const w = spec.width / 2;
+    const gap = 0.75 + lv.par * 0.5; // за один приём нужно ~1.3–1.45 м
+    const o = [];
+    o.push(obj('wall', 6, 0.125, 40, 0.25));
+    const cy = -0.02 - 0.15 - w; // 0.15 — вылет зеркала за борт
+    const ahead = makeCar(r, 0, -0.05 - 0.9, 0, { len: 4.6, wid: 1.8 });
+    ahead.x = spec.wheelbase + spec.frontOverhang + gap + ahead.w / 2;
+    o.push(ahead);
+    o.push(obj('pillar', -spec.rearOverhang - 1.0, -0.4, 0.5, 0.5));
+    o.push(obj('curb', 6, -2 * w - lv.lane - 0.075, 40, 0.15));
+    o.push(obj('sidewalk', 6, -2 * w - lv.lane - 1.65, 40, 3));
+    o.push(obj('goal', ahead.x + 9, -2 * w - lv.lane / 2 + 0.3, 8, lv.lane - 0.4, 0));
+    return { name: 'Выезд от стены впритык', start: { x: 0, y: cy, h: 0 }, objects: o };
+  }
+
   function sandbox(spec) {
     const r = rng(5);
     const o = [];
@@ -193,6 +215,7 @@ PA.scenarios = (function () {
     { id: 'angled', name: 'Ёлочка 45°', build: angled },
     { id: 'garage', name: 'Узкий гараж', build: garage },
     { id: 'exit', name: 'Выезд из тесной параллельной', build: (s, l) => parallel(s, l, true) },
+    { id: 'wall', name: 'Выезд от стены впритык', build: wallExit },
     { id: 'uturn', name: 'Разворот в три приёма', build: threePoint },
     { id: 'sandbox', name: 'Свободная площадка', build: sandbox },
   ];

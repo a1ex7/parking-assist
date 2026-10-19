@@ -77,6 +77,7 @@ PA.Editor = class Editor {
     if (tool === 'car') {
       const colors = ['#5d6675', '#8a2f2f', '#2f4f8a', '#c7c9cc', '#1f2328', '#3f6b4f', '#7a6a55'];
       o.color = colors[Math.floor(Math.random() * colors.length)];
+      o.style = ['sedan', 'hatch', 'suv'][Math.floor(Math.random() * 3)];
     }
     if (tool === 'goal') {
       this.world.objects = this.world.objects.filter((x) => x.type !== 'goal');
@@ -189,7 +190,7 @@ PA.Editor = class Editor {
   duplicate() {
     const sel = this.selected;
     if (!sel || sel === 'start' || sel.type === 'goal') return;
-    const { _poly, _bb, ...rest } = sel;
+    const { _poly, _bb, _spec, ...rest } = sel;
     const c = { ...rest, x: sel.x + 0.5, y: sel.y + 0.5 };
     this.world.objects.push(c);
     this.world.dirty = true;

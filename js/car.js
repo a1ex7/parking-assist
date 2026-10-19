@@ -27,24 +27,14 @@ PA.kin = (function () {
     return { x: pose.x + p.x, y: pose.y + p.y };
   }
 
-  /** Контур кузова с фасками на углах (выпуклый восьмиугольник). */
-  function bodyLocal(spec) {
-    const r = -spec.rearOverhang, f = spec.wheelbase + spec.frontOverhang, w = spec.width / 2;
-    const cf = Math.min(0.16, w * 0.18), cr = Math.min(0.12, w * 0.14);
-    return [
-      [r + cr, -w], [f - cf, -w], [f, -w + cf], [f, w - cf],
-      [f - cf, w], [r + cr, w], [r, w - cr], [r, -w + cr],
-    ];
-  }
-
+  /** Контур кузова в плане (выпуклый, с сужением кормы) — см. PA.carArt.outline. */
   function bodyPoly(spec, pose) {
-    return bodyLocal(spec).map(([lx, ly]) => toWorld(pose, lx, ly));
+    return PA.carArt.outline(spec).map((p) => toWorld(pose, p.x, p.y));
   }
 
-  /** Углы бамперов: [заднийЛ, переднийЛ, переднийП, заднийП]. */
+  /** Углы кузова: [заднийЛ, переднийЛ, переднийП, заднийП]. */
   function corners(spec, pose) {
-    const r = -spec.rearOverhang, f = spec.wheelbase + spec.frontOverhang, w = spec.width / 2;
-    return [toWorld(pose, r, -w), toWorld(pose, f, -w), toWorld(pose, f, w), toWorld(pose, r, w)];
+    return PA.carArt.corners(spec).map((p) => toWorld(pose, p.x, p.y));
   }
 
   /** Колёса с углами по Аккерману. Возвращает [ПЛ, ПП, ЗЛ, ЗП]. */
@@ -70,7 +60,37 @@ PA.kin = (function () {
     return { x: pose.x - Math.sin(pose.h) * R, y: pose.y + Math.cos(pose.h) * R, r: R };
   }
 
-  return { curvature, advance, toWorld, bodyLocal, bodyPoly, corners, wheels, turnCenter };
+  return { curvature, advance, toWorld, bodyPoly, corners, wheels, turnCenter };
+})();
+
+/* Фиксаторы руля: центр и каждый полный оборот (метка руля снова вверху). */
+PA.steering = (function () {
+  const FULL = Math.PI * 2;
+  const ZONE = PA.geo.rad(8); // зона удержания при перетаскивании
+  const RAMP = PA.geo.rad(8); // зона плавного выхода из фиксатора
+
+  const nearest = (a) => Math.round(a / FULL) * FULL;
+
+  /** Перетаскивание: сырой угол → угол с залипанием; функция непрерывна и без накопления смещения. */
+  function detent(raw) {
+    const d = nearest(raw), off = raw - d, abs = Math.abs(off);
+    if (abs <= ZONE) return d;
+    if (abs <= ZONE + RAMP) return d + Math.sign(off) * ((abs - ZONE) * (ZONE + RAMP)) / RAMP;
+    return raw;
+  }
+
+  /** Клавиши: фиксатор, через который (или на который) прошёл руль за шаг, иначе null. */
+  function crossed(prev, next) {
+    const lo = Math.min(prev, next), hi = Math.max(prev, next);
+    for (let d = Math.ceil(lo / FULL) * FULL; d <= hi; d += FULL) {
+      if (Math.abs(d - prev) > 1e-9) return d;
+    }
+    return null;
+  }
+
+  const isDetent = (a) => Math.abs(a - nearest(a)) < 1e-6;
+
+  return { detent, crossed, isDetent };
 })();
 
 PA.Car = class Car {
@@ -91,6 +111,14 @@ PA.Car = class Car {
     this.wheelAngle = 0;
     this.speed = 0;
     this.gear = 'D';
+    this.centering = false;
+    this.detentHold = 0;
+  }
+
+  /** Плавное выравнивание руля в центр. */
+  center() {
+    this.centering = true;
+    this.detentHold = 0;
   }
 
   get pose() { return { x: this.x, y: this.y, h: this.h }; }
@@ -110,6 +138,8 @@ PA.Car = class Car {
   restore(s) {
     Object.assign(this, s);
     this.speed = 0;
+    this.centering = false;
+    this.detentHold = 0;
   }
 
   /**
@@ -119,11 +149,32 @@ PA.Car = class Car {
   update(dt, input, opts, collides) {
     const g = PA.geo;
     if (input.steer) {
-      this.setWheel(this.wheelAngle + input.steer * g.rad(opts.steerSpeed) * dt);
+      this.centering = false;
+      if (this.detentHold > 0) {
+        this.detentHold -= dt;
+      } else {
+        const prev = this.wheelAngle;
+        let next = prev + input.steer * g.rad(opts.steerSpeed) * dt;
+        const d = PA.steering.crossed(prev, next);
+        if (d != null && Math.abs(d) <= this.spec.maxWheelAngle) {
+          next = d;
+          this.detentHold = 0.22;
+          if (this.onDetent) this.onDetent();
+        }
+        this.setWheel(next);
+      }
+    } else if (this.centering) {
+      this.detentHold = 0;
+      const step = g.rad(1440) * dt;
+      this.setWheel(Math.abs(this.wheelAngle) <= step ? 0 : this.wheelAngle - Math.sign(this.wheelAngle) * step);
+      if (this.wheelAngle === 0) this.centering = false;
     } else if (opts.autoCenter && Math.abs(this.speed) > 0.05) {
+      this.detentHold = 0;
       // самовозврат руля пропорционально пройденному пути
       const back = Math.abs(this.speed) * dt * 1.2;
       this.setWheel(Math.sign(this.wheelAngle) * Math.max(0, Math.abs(this.wheelAngle) - back));
+    } else {
+      this.detentHold = 0;
     }
 
     const vmax = (input.slow ? Math.min(1, opts.maxSpeed) : opts.maxSpeed) / 3.6;

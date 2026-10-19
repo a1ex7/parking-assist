@@ -5,19 +5,21 @@ PA.sensors = (function () {
   const SPREAD = PA.geo.rad(22);
   const RAYS = 5;
 
+  /** Датчики стоят на реальном контуре бампера. */
   function layout(spec) {
-    const f = spec.wheelbase + spec.frontOverhang, r = -spec.rearOverhang, w = spec.width / 2;
-    const c = PA.geo.rad(55);
-    return [
-      { lx: f - 0.06, ly: -w * 0.86, a: -c, range: 0.9, front: true },
-      { lx: f, ly: -w * 0.32, a: 0, range: 1.5, front: true },
-      { lx: f, ly: w * 0.32, a: 0, range: 1.5, front: true },
-      { lx: f - 0.06, ly: w * 0.86, a: c, range: 0.9, front: true },
-      { lx: r + 0.06, ly: -w * 0.86, a: Math.PI + c, range: 0.9, front: false },
-      { lx: r, ly: -w * 0.32, a: Math.PI, range: 1.8, front: false },
-      { lx: r, ly: w * 0.32, a: Math.PI, range: 1.8, front: false },
-      { lx: r + 0.06, ly: w * 0.86, a: Math.PI - c, range: 0.9, front: false },
-    ];
+    const w = spec.width / 2, c = PA.geo.rad(55);
+    const at = (ly, front) => PA.carArt.bumperX(spec, ly, front) + (front ? -0.01 : 0.01);
+    const list = [];
+    for (const front of [true, false]) {
+      const base = front ? 0 : Math.PI, k = front ? 1 : -1;
+      list.push(
+        { lx: at(-w * 0.78, front), ly: -w * 0.78, a: base - k * c, range: 0.9, front },
+        { lx: at(-w * 0.32, front), ly: -w * 0.32, a: base, range: front ? 1.5 : 1.8, front },
+        { lx: at(w * 0.32, front), ly: w * 0.32, a: base, range: front ? 1.5 : 1.8, front },
+        { lx: at(w * 0.78, front), ly: w * 0.78, a: base + k * c, range: 0.9, front },
+      );
+    }
+    return list;
   }
 
   function read(world, spec, pose) {

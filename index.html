@@ -38,6 +38,7 @@
           <option value="hard">Тесно</option>
         </select>
       </label>
+      <button id="planBtnPanel" class="btn primary wide">🅿 Найти манёвр парковки</button>
       <div class="row">
         <button id="resetBtn" class="btn">↺ В начало</button>
         <button id="undoBtn" class="btn" title="Backspace">⤺ Отменить манёвр</button>
@@ -51,6 +52,9 @@
       </label>
       <details id="carDetails">
         <summary>Габариты и рулевое</summary>
+        <label class="field">Тип кузова
+          <select id="bodySel"></select>
+        </label>
         <div class="grid2" id="carFields"></div>
         <dl class="derived" id="carDerived"></dl>
       </details>
@@ -89,9 +93,11 @@
       <h2>Клавиши</h2>
       <ul>
         <li><kbd>W</kbd>/<kbd>↑</kbd> вперёд, <kbd>S</kbd>/<kbd>↓</kbd> назад</li>
-        <li><kbd>A</kbd>/<kbd>←</kbd>, <kbd>D</kbd>/<kbd>→</kbd> руль, <kbd>C</kbd> руль прямо</li>
-        <li><kbd>Пробел</kbd> тормоз, <kbd>Shift</kbd> медленно</li>
+        <li><kbd>A</kbd>/<kbd>←</kbd>, <kbd>D</kbd>/<kbd>→</kbd> руль</li>
+        <li><kbd>Пробел</kbd> или клик по рулю — руль прямо</li>
+        <li><kbd>X</kbd> тормоз, <kbd>Shift</kbd> медленно</li>
         <li><kbd>Backspace</kbd> отменить манёвр, <kbd>V</kbd> вид, <kbd>F</kbd> вписать</li>
+        <li><kbd>P</kbd> найти манёвр парковки</li>
         <li>Колесо мыши / щипок — масштаб, перетаскивание — сдвиг</li>
       </ul>
       <p class="muted">Редактор: <kbd>Q</kbd>/<kbd>E</kbd> поворот, <kbd>Del</kbd> удалить, <kbd>Ctrl+D</kbd> копия, стрелки — сдвиг.</p>
@@ -118,10 +124,24 @@
 
     <div id="viewBtns">
       <button class="icon-btn only-mobile" id="panelOpen" aria-label="Настройки">☰</button>
+      <button class="icon-btn accent" id="planBtn" title="Найти манёвр парковки (P)">P</button>
       <button class="icon-btn" id="viewMode" title="Вид (V)">🗺</button>
       <button class="icon-btn" id="fitBtn" title="Вписать (F)">⤢</button>
       <button class="icon-btn" id="zoomIn" title="Приблизить">＋</button>
       <button class="icon-btn" id="zoomOut" title="Отдалить">－</button>
+    </div>
+
+    <div id="planCard" hidden>
+      <div class="plan-head">
+        <b id="planTitle">Манёвр</b>
+        <button class="icon-btn small" id="planClose" aria-label="Закрыть">✕</button>
+      </div>
+      <div id="planInfo" class="muted"></div>
+      <ol id="planSteps"></ol>
+      <div class="row plan-actions">
+        <button class="btn primary" id="planRun">▶ Выполнить</button>
+        <button class="btn" id="planStep">⏭ Шаг</button>
+      </div>
     </div>
 
     <div id="editBar" hidden>
@@ -142,7 +162,7 @@
 
     <div id="controls">
       <div id="wheelWrap">
-        <svg id="wheel" viewBox="-60 -60 120 120" aria-label="Руль: перетащите по кругу">
+        <svg id="wheel" viewBox="-60 -60 120 120" aria-label="Руль: перетащите по кругу, клик — выровнять">
           <circle r="52" class="rim"/>
           <circle r="52" class="rim-hi"/>
           <path d="M-46 6 L-14 10 L-10 22 L10 22 L14 10 L46 6" class="spoke"/>
@@ -177,13 +197,16 @@
 
 <script src="js/geometry.js"></script>
 <script src="js/vehicles.js"></script>
+<script src="js/carart.js"></script>
 <script src="js/car.js"></script>
 <script src="js/world.js"></script>
 <script src="js/scenarios.js"></script>
 <script src="js/trajectory.js"></script>
 <script src="js/sensors.js"></script>
+<script src="js/planner.js"></script>
 <script src="js/renderer.js"></script>
 <script src="js/editor.js"></script>
+<script src="js/autopark.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

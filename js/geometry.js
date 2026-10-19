@@ -95,6 +95,24 @@ PA.geo = (function () {
     return best;
   }
 
+  /** Выпуклая оболочка (монотонная цепь Эндрю), обход против часовой в системе с осью Y вниз. */
+  function convexHull(points) {
+    const pts = points.slice().sort((a, b) => a.x - b.x || a.y - b.y);
+    if (pts.length < 3) return pts;
+    const cross = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+    const lower = [], upper = [];
+    for (const p of pts) {
+      while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 1e-12) lower.pop();
+      lower.push(p);
+    }
+    for (let i = pts.length - 1; i >= 0; i--) {
+      const p = pts[i];
+      while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 1e-12) upper.pop();
+      upper.push(p);
+    }
+    return lower.slice(0, -1).concat(upper.slice(0, -1));
+  }
+
   function normAngle(a) {
     while (a > Math.PI) a -= Math.PI * 2;
     while (a < -Math.PI) a += Math.PI * 2;
@@ -105,5 +123,5 @@ PA.geo = (function () {
   const deg = (r) => (r * 180) / Math.PI;
   const rad = (d) => (d * Math.PI) / 180;
 
-  return { rot, rectPoly, circlePoly, bbox, bboxOverlap, polysIntersect, pointInPoly, rayPoly, normAngle, clamp, deg, rad };
+  return { rot, rectPoly, convexHull, circlePoly, bbox, bboxOverlap, polysIntersect, pointInPoly, rayPoly, normAngle, clamp, deg, rad };
 })();

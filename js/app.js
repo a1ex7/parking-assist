@@ -5,7 +5,7 @@
 
   const DEFAULT_OPTS = {
     fill: true, marks: true, wheels: false, both: true, extremes: false, center: false,
-    sensors: true, sound: false, trail: true,
+    sensors: true, sound: false, trail: true, mirrorHits: true,
     length: 6, maxSpeed: 5, steerSpeed: 360, autoCenter: false, carColor: '#2563eb',
   };
   const TOGGLES = [
@@ -18,6 +18,7 @@
     ['sensors', 'Парктроники'],
     ['sound', 'Звук парктроников'],
     ['trail', 'След движения'],
+    ['mirrorHits', 'Зеркала задевают стены, заборы, колонны'],
   ];
   const VIEWS = { free: ['🗺', 'Свободный вид'], follow: ['🎯', 'Следовать за авто'], car: ['🚘', 'Вид 360° (авто вверх)'] };
   const CAR_FIELDS = [
@@ -31,6 +32,10 @@
   }
 
   const saved = load();
+  if (saved.spec && !saved.spec.style) {
+    const preset = PA.vehicles.presets.find((p) => p.id === saved.spec.id);
+    saved.spec.style = preset ? preset.style : 'sedan';
+  }
   const app = {
     canvas: $('view'),
     opts: { ...DEFAULT_OPTS, ...(saved.opts || {}) },
@@ -66,6 +71,7 @@
   }
 
   function restart() {
+    if (app.autopark) app.autopark.clear();
     app.car.reset(app.world.start);
     app.run = newRun();
     app.run.trail.push({ x: app.car.x, y: app.car.y });
@@ -205,6 +211,7 @@
     for (const inp of box.querySelectorAll('input')) {
       if (document.activeElement !== inp) inp.value = app.spec[inp.dataset.key];
     }
+    $('bodySel').value = app.spec.style || 'sedan';
     const d = app.car.spec;
     const rows = [
       ['Макс. угол колёс', `${PA.geo.deg(d.maxSteer).toFixed(1)}°`],
@@ -243,6 +250,8 @@
       if (e.target.value === 'custom') { $('carDetails').open = true; return; }
       setSpec(PA.vehicles.byId(e.target.value));
     };
+    for (const [id, st] of Object.entries(PA.carArt.STYLES)) $('bodySel').add(new Option(st.label, id));
+    $('bodySel').onchange = (e) => setSpec({ ...app.spec, id: 'custom', name: 'Свой автомобиль', style: e.target.value });
     $('carColor').value = app.opts.carColor;
     $('carColor').oninput = (e) => { app.opts.carColor = e.target.value; save(); };
 
@@ -478,18 +487,28 @@
     wheel.addEventListener('pointerdown', (e) => {
       wakeAudio();
       wheel.setPointerCapture(e.pointerId);
-      wheelDrag = wheelAngleAt(e);
+      app.car.centering = false;
+      // raw — угол «как повернула рука», руль показывает его с залипанием в фиксаторах
+      wheelDrag = { a: wheelAngleAt(e), raw: app.car.wheelAngle, travel: 0, t: performance.now() };
     });
     wheel.addEventListener('pointermove', (e) => {
-      if (wheelDrag == null) return;
+      if (!wheelDrag) return;
       const a = wheelAngleAt(e);
-      app.car.setWheel(app.car.wheelAngle + PA.geo.normAngle(a - wheelDrag));
-      wheelDrag = a;
+      const d = PA.geo.normAngle(a - wheelDrag.a);
+      const max = app.car.spec.maxWheelAngle;
+      wheelDrag.a = a;
+      wheelDrag.travel += Math.abs(d);
+      wheelDrag.raw = PA.geo.clamp(wheelDrag.raw + d, -max, max);
+      const was = PA.steering.isDetent(app.car.wheelAngle);
+      app.car.setWheel(PA.steering.detent(wheelDrag.raw));
+      if (!was && PA.steering.isDetent(app.car.wheelAngle)) detentTick();
     });
-    const wheelEnd = () => { wheelDrag = null; };
-    wheel.addEventListener('pointerup', wheelEnd);
-    wheel.addEventListener('pointercancel', wheelEnd);
-    wheel.addEventListener('dblclick', () => app.car.setWheel(0));
+    wheel.addEventListener('pointerup', () => {
+      // короткий клик без поворота — выровнять руль
+      if (wheelDrag && wheelDrag.travel < PA.geo.rad(4) && performance.now() - wheelDrag.t < 350) app.car.center();
+      wheelDrag = null;
+    });
+    wheel.addEventListener('pointercancel', () => { wheelDrag = null; });
 
     // педали
     for (const b of document.querySelectorAll('.pedal')) {
@@ -513,16 +532,21 @@
 
     // клавиатура
     window.addEventListener('keydown', (e) => {
-      const tag = e.target.tagName;
-      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+      const t = e.target;
+      const typing = t.tagName === 'SELECT' || t.tagName === 'TEXTAREA' ||
+        (t.tagName === 'INPUT' && !['checkbox', 'range', 'color', 'file'].includes(t.type));
+      if (typing) return;
+      // кнопки и галочки не должны перехватывать пробел и стрелки управления
+      if (t !== document.body && typeof t.blur === 'function') t.blur();
       wakeAudio();
       if (app.mode === 'edit') {
         if (app.editor.keyDown(e)) { e.preventDefault(); return; }
       } else {
         if (e.code === 'Backspace' || ((e.ctrlKey || e.metaKey) && e.code === 'KeyZ')) { e.preventDefault(); undo(); return; }
-        if (e.code === 'KeyC') app.car.setWheel(0);
+        if ((e.code === 'Space' || e.code === 'KeyC') && !e.repeat) app.car.center();
       }
       if (e.code === 'KeyV' && !e.ctrlKey && !e.metaKey) cycleView();
+      if (e.code === 'KeyP' && !e.ctrlKey && !e.metaKey && app.mode === 'drive') app.autopark.find();
       if (e.code === 'KeyF' && !e.ctrlKey && !e.metaKey) fitView();
       if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
       app.keys.add(e.code);
@@ -531,6 +555,16 @@
     window.addEventListener('blur', () => app.keys.clear());
     window.addEventListener('resize', () => app.renderer.resize());
   }
+
+  /** Лёгкий «щелчок» фиксатора: вибрация на телефоне и пульс метки руля. */
+  function detentTick() {
+    if (navigator.vibrate) { try { navigator.vibrate(8); } catch (e) { /* не поддерживается */ } }
+    const wheel = $('wheel');
+    wheel.classList.remove('tick');
+    void wheel.getBoundingClientRect();
+    wheel.classList.add('tick');
+  }
+  app.car.onDetent = detentTick;
 
   let audioWoken = false;
   function wakeAudio() {
@@ -544,11 +578,12 @@
     const steer = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0);
     let drive = (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0) - (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0);
     if (app.pad.drive) drive = app.pad.drive;
-    return { steer, drive, brake: k.has('Space') || app.pad.brake, slow: k.has('ShiftLeft') || k.has('ShiftRight') };
+    return { steer, drive, brake: k.has('KeyX') || app.pad.brake, slow: k.has('ShiftLeft') || k.has('ShiftRight') };
   }
 
   // ------------------------------------------------------------ манёвры
   function undo() {
+    app.autopark.clear();
     const s = app.run.undo.pop();
     if (!s) { toast('Нечего отменять', 'info'); return; }
     app.car.restore(s.car);
@@ -559,6 +594,30 @@
     toast('Манёвр отменён', 'info');
   }
 
+  /** Начало движения: точка отмены и счётчик смен направления. */
+  function beginMove(pre, dir) {
+    const run = app.run;
+    run.undo.push({
+      car: pre, trailLen: run.trail.length,
+      run: { maneuvers: run.maneuvers, collisions: run.collisions, distance: run.distance, time: run.time, lastDir: run.lastDir, started: run.started },
+    });
+    if (run.undo.length > 100) run.undo.shift();
+    if (dir !== run.lastDir) run.maneuvers++;
+    run.lastDir = dir;
+    run.started = true;
+  }
+
+  function trackMove(dist, now, active = dist > 0) {
+    const run = app.run, car = app.car;
+    if (active) app.lastMoveAt = now;
+    run.distance += dist;
+    const last = run.trail[run.trail.length - 1];
+    if (!last || Math.hypot(car.x - last.x, car.y - last.y) > 0.05) run.trail.push({ x: car.x, y: car.y });
+    if (run.trail.length > 6000) run.trail.splice(0, 1000);
+  }
+  app.beginMove = beginMove;
+  app.trackMove = trackMove;
+
   function step(dt, now) {
     const car = app.car, run = app.run, world = app.world;
     const input = readInput();
@@ -567,22 +626,9 @@
     const ignore = new Set(world.hits(car.spec, car.pose, car.steer));
     const ev = car.update(dt, input, app.opts, (pose) => world.collides(car.spec, pose, car.steer, ignore));
 
-    if (wasStopped && car.speed !== 0) {
-      run.undo.push({
-        car: pre, trailLen: run.trail.length,
-        run: { maneuvers: run.maneuvers, collisions: run.collisions, distance: run.distance, time: run.time, lastDir: run.lastDir, started: run.started },
-      });
-      if (run.undo.length > 100) run.undo.shift();
-      const dir = Math.sign(car.speed);
-      if (dir !== run.lastDir) run.maneuvers++;
-      run.lastDir = dir;
-      run.started = true;
-    }
-    if (car.speed !== 0 || ev.hit) app.lastMoveAt = now;
-    run.distance += ev.distance;
-    const last = run.trail[run.trail.length - 1];
-    if (!last || Math.hypot(car.x - last.x, car.y - last.y) > 0.05) run.trail.push({ x: car.x, y: car.y });
-    if (run.trail.length > 6000) run.trail.splice(0, 1000);
+    if (wasStopped && car.speed !== 0) beginMove(pre, Math.sign(car.speed));
+    if (ev.distance > 0 && app.autopark) app.autopark.invalidate();
+    trackMove(ev.distance, now, car.speed !== 0 || ev.hit);
 
     if (ev.hit) {
       if (!run.contact) {
@@ -673,15 +719,17 @@
     const dt = Math.min(0.05, (now - lastT) / 1000);
     lastT = now;
     const car = app.car, world = app.world, opts = app.opts;
+    world.mirrorHits = opts.mirrorHits;
     const editing = app.mode === 'edit';
     let input = { brake: false };
-    if (!editing && $('success').hidden) input = step(dt, now);
+    if (!editing && $('success').hidden && !app.autopark.update(dt, now)) input = step(dt, now);
 
     const steer = car.steer;
     const overlap = world.hits(car.spec, car.pose, steer);
     const ignore = new Set(overlap);
     const gs = world.checkGoal(car.spec, car.pose);
-    if (!editing && gs && gs.ok && car.speed === 0 && app.run.started && !app.run.done) showSuccess(gs);
+    // пока выполняется план автопарковки, промежуточные остановки в месте — ещё не финиш
+    if (!editing && gs && gs.ok && car.speed === 0 && app.run.started && !app.run.done && !app.autopark.plan) showSuccess(gs);
 
     let path = null, backPath = null, extremes = [], sensors = null;
     if (!editing) {
@@ -705,6 +753,7 @@
     updateCamera(dt);
     const st = {
       world, car, opts, path, backPath, extremes, sensors, trail: app.run.trail, goalState: gs,
+      plan: app.autopark.plan, planIdx: app.autopark.idx,
       editing, selected: app.selected, hitSet, colliding: overlap.length > 0, braking: input.brake || (input.drive && Math.sign(input.drive) !== Math.sign(car.speed) && car.speed !== 0),
     };
     app.renderer.draw(st);
@@ -715,6 +764,8 @@
 
   // ------------------------------------------------------------ старт
   app.editor = new PA.Editor(app);
+  app.autopark = new PA.Autopark(app);
+  app.toast = toast;
   initPanel();
   initInput();
 

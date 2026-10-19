@@ -64,6 +64,7 @@ PA.Renderer = class Renderer {
     for (const o of objs) if (o.type === 'line') this.drawRect(o, PA.TYPES.line.color);
     for (const o of objs) if (o.type === 'goal') this.drawGoal(o, st.goalState, px);
     if (st.opts.trail && st.trail.length > 1) this.drawTrail(st.trail, px);
+    if (!st.editing && st.plan) this.drawPlan(st.car.spec, st.plan, st.planIdx, px);
 
     if (!st.editing) {
       if (st.opts.extremes) for (const p of st.extremes) this.drawGhost(st.car.spec, p, px);
@@ -294,6 +295,57 @@ PA.Renderer = class Renderer {
     ctx.setLineDash([]);
   }
 
+  /** План автопарковки: путь задней оси, силуэты в точках смены действия, итоговая поза. */
+  drawPlan(spec, plan, idx, px) {
+    const { ctx } = this;
+    const outline = (pose) => {
+      const poly = PA.kin.bodyPoly(spec, pose);
+      ctx.beginPath();
+      poly.forEach((q, i) => (i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y)));
+      ctx.closePath();
+    };
+    plan.steps.forEach((s, i) => {
+      const [r, g, b] = this.pathColor(s.dir);
+      const n = Math.max(2, Math.ceil(s.dist / 0.15));
+      ctx.beginPath();
+      for (let j = 0; j <= n; j++) {
+        const p = PA.kin.advance(s.from, s.kappa, (s.dir * s.dist * j) / n);
+        if (j) ctx.lineTo(p.x, p.y); else ctx.moveTo(p.x, p.y);
+      }
+      ctx.strokeStyle = `rgba(${r},${g},${b},${i < idx ? 0.25 : 0.95})`;
+      ctx.lineWidth = 3 * px;
+      ctx.setLineDash(i === idx ? [] : [8 * px, 5 * px]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      if (i >= idx && i < plan.steps.length - 1) {
+        outline(s.to);
+        ctx.strokeStyle = `rgba(${r},${g},${b},0.55)`;
+        ctx.lineWidth = 1.5 * px;
+        ctx.setLineDash([4 * px, 4 * px]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    });
+    outline(plan.end);
+    ctx.fillStyle = 'rgba(52,211,153,0.12)';
+    ctx.fill();
+    ctx.strokeStyle = '#34d399';
+    ctx.lineWidth = 2 * px;
+    ctx.stroke();
+    // номера шагов у начала каждого действия
+    plan.steps.forEach((s, i) => {
+      if (i < idx) return;
+      ctx.beginPath();
+      ctx.arc(s.from.x, s.from.y, 9 * px, 0, Math.PI * 2);
+      ctx.fillStyle = i === idx ? '#f8fafc' : 'rgba(30,33,39,0.9)';
+      ctx.fill();
+      ctx.strokeStyle = s.dir > 0 ? '#22d3ee' : '#fbbf24';
+      ctx.lineWidth = 2 * px;
+      ctx.stroke();
+      this.label(String(i + 1), s.from.x, s.from.y, px, i === idx ? '#111' : '#f8fafc', 11);
+    });
+  }
+
   label(text, x, y, px, color, size = 11, boxed = false) {
     const { ctx } = this;
     ctx.save();
@@ -322,7 +374,8 @@ PA.Renderer = class Renderer {
     const t = PA.TYPES[o.type];
     const { ctx } = this;
     if (o.type === 'car') {
-      this.drawCarBody(o.x, o.y, o.a || 0, o.w, o.h, o.color || t.color, { parked: true });
+      const spec = PA.carArt.parkedSpec(o);
+      PA.carArt.draw(ctx, spec, PA.carArt.parkedPose(o, spec), { color: o.color || t.color, style: o.style });
     } else if (t.round) {
       ctx.beginPath();
       ctx.arc(o.x, o.y, o.w / 2, 0, Math.PI * 2);
@@ -375,6 +428,7 @@ PA.Renderer = class Renderer {
   }
 
   polyFor(o) {
+    if (o.type === 'car') return PA.carArt.parkedPoly(o);
     return PA.TYPES[o.type].round ? PA.geo.circlePoly(o.x, o.y, o.w / 2) : PA.geo.rectPoly(o.x, o.y, o.w, o.h, o.a || 0);
   }
 
@@ -388,90 +442,28 @@ PA.Renderer = class Renderer {
     c.closePath();
   }
 
-  /** Автомобиль сверху в локальных координатах центра кузова (вперёд — +x). */
-  drawCarBody(cx, cy, a, len, wid, color, o = {}) {
-    const c = this.ctx;
-    const hl = len / 2, hw = wid / 2;
-    c.save();
-    c.translate(cx, cy);
-    c.rotate(a);
-    // тень
-    c.fillStyle = 'rgba(0,0,0,0.35)';
-    this.roundRect(c, -hl - 0.05, -hw - 0.05, len + 0.1, wid + 0.1, wid * 0.24);
-    c.fill();
-    // зеркала
-    c.fillStyle = color;
-    const mx = hl * 0.28;
-    c.fillRect(mx - 0.08, -hw - 0.13, 0.16, 0.15);
-    c.fillRect(mx - 0.08, hw - 0.02, 0.16, 0.15);
-    // кузов
-    const grad = c.createLinearGradient(0, -hw, 0, hw);
-    grad.addColorStop(0, shade(color, -0.18));
-    grad.addColorStop(0.5, shade(color, 0.12));
-    grad.addColorStop(1, shade(color, -0.18));
-    c.fillStyle = grad;
-    this.roundRect(c, -hl, -hw, len, wid, Math.min(wid * 0.22, 0.42));
-    c.fill();
-    // стёкла и крыша
-    const glass = o.player ? 'rgba(20,30,45,0.88)' : 'rgba(18,24,34,0.85)';
-    const fw = hl * 0.52, rw = -hl * 0.55;
-    c.fillStyle = glass;
-    c.beginPath();
-    c.moveTo(fw, -hw * 0.78); c.lineTo(fw + len * 0.1, -hw * 0.68);
-    c.lineTo(fw + len * 0.1, hw * 0.68); c.lineTo(fw, hw * 0.78);
-    c.closePath();
-    c.fill();
-    c.beginPath();
-    c.moveTo(rw, -hw * 0.76); c.lineTo(rw - len * 0.07, -hw * 0.64);
-    c.lineTo(rw - len * 0.07, hw * 0.64); c.lineTo(rw, hw * 0.76);
-    c.closePath();
-    c.fill();
-    c.fillStyle = shade(color, 0.05);
-    this.roundRect(c, rw, -hw * 0.78, fw - rw, wid * 0.78, 0.12);
-    c.fill();
-    c.fillStyle = 'rgba(15,20,28,0.55)';
-    c.fillRect(rw + 0.08, -hw * 0.86, fw - rw - 0.16, 0.07);
-    c.fillRect(rw + 0.08, hw * 0.86 - 0.07, fw - rw - 0.16, 0.07);
-    // фары
-    c.fillStyle = '#f5f1d8';
-    c.fillRect(hl - 0.1, -hw + 0.12, 0.08, 0.32);
-    c.fillRect(hl - 0.1, hw - 0.44, 0.08, 0.32);
-    c.fillStyle = o.brake ? '#ff3b3b' : '#a11d1d';
-    c.fillRect(-hl + 0.02, -hw + 0.1, 0.08, 0.34);
-    c.fillRect(-hl + 0.02, hw - 0.44, 0.08, 0.34);
-    if (o.reverse) {
-      c.fillStyle = '#ffffff';
-      c.fillRect(-hl + 0.02, -hw + 0.44, 0.07, 0.12);
-      c.fillRect(-hl + 0.02, hw - 0.56, 0.07, 0.12);
-      c.fillStyle = 'rgba(255,255,255,0.12)';
-      c.beginPath();
-      c.moveTo(-hl, -hw * 0.7); c.lineTo(-hl - 1.6, -hw * 1.4); c.lineTo(-hl - 1.6, hw * 1.4); c.lineTo(-hl, hw * 0.7);
-      c.fill();
-    }
-    c.restore();
-  }
-
   drawPlayer(car, st, px) {
     const s = car.spec;
-    const off = (s.wheelbase + s.frontOverhang - s.rearOverhang) / 2;
-    const ctr = PA.kin.toWorld(car.pose, off, 0);
     const { ctx } = this;
-    this.drawCarBody(ctr.x, ctr.y, car.h, s.length, s.width, st.opts.carColor || '#2563eb', {
-      player: true, brake: st.braking, reverse: car.gear === 'R',
-    });
-    // колёса поверх кузова (как «прозрачный» автомобиль в 360°-камерах)
+    // колёса под кузовом: при повороте видны края шин, выступающие из арок
     for (const w of PA.kin.wheels(s, car.pose, car.steer)) {
       ctx.save();
       ctx.translate(w.x, w.y);
       ctx.rotate(w.a);
-      ctx.fillStyle = 'rgba(10,10,12,0.92)';
-      this.roundRect(ctx, -0.33, -0.11, 0.66, 0.22, 0.05);
+      ctx.fillStyle = '#0d0e10';
+      this.roundRect(ctx, -0.33, -0.11, 0.66, 0.22, 0.06);
       ctx.fill();
-      ctx.strokeStyle = w.front ? 'rgba(125,211,252,0.9)' : 'rgba(255,255,255,0.35)';
-      ctx.lineWidth = 1.2 * px;
+      ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+      ctx.lineWidth = 0.02;
+      ctx.beginPath();
+      for (const x of [-0.2, -0.07, 0.07, 0.2]) { ctx.moveTo(x, -0.11); ctx.lineTo(x, 0.11); }
       ctx.stroke();
       ctx.restore();
     }
+    PA.carArt.draw(ctx, s, car.pose, {
+      color: st.opts.carColor || '#2563eb', brake: st.braking, reverse: car.gear === 'R',
+      shadow: true,
+    });
     if (st.colliding) {
       const poly = PA.kin.bodyPoly(s, car.pose);
       ctx.beginPath();
@@ -581,10 +573,3 @@ PA.Renderer = class Renderer {
     ctx.fillText(`${m} м`, x + w / 2, y - 6);
   }
 };
-
-function shade(hex, k) {
-  const n = parseInt(hex.slice(1), 16);
-  const f = (c) => Math.round(PA.geo.clamp(k > 0 ? c + (255 - c) * k : c * (1 + k), 0, 255));
-  const r = f(n >> 16), g = f((n >> 8) & 255), b = f(n & 255);
-  return `rgb(${r},${g},${b})`;
-}

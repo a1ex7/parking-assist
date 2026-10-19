@@ -139,7 +139,9 @@ kbd {
 #wheel .rim-hi { fill: none; stroke: rgba(255,255,255,.08); stroke-width: 2; }
 #wheel .spoke { fill: none; stroke: #2b2f36; stroke-width: 9; stroke-linejoin: round; stroke-linecap: round; }
 #wheel .hub { fill: #1f2328; stroke: #3a404a; stroke-width: 2; }
-#wheel .mark { fill: var(--accent); }
+#wheel .mark { fill: var(--accent); transform-box: fill-box; transform-origin: center; }
+#wheel.tick .mark { animation: detent .25s ease-out; }
+@keyframes detent { 40% { fill: #fff; transform: scale(1.6); } }
 #wheelVal {
   font-size: 12px; color: var(--muted); background: rgba(22,24,28,.75); padding: 2px 10px; border-radius: 10px;
   font-variant-numeric: tabular-nums; white-space: nowrap;
@@ -155,6 +157,33 @@ kbd {
 .pedal.rev { color: var(--amber); }
 .pedal.brake { color: #fca5a5; height: 44px; }
 .pedal.active { background: #3a404a; transform: scale(.97); }
+
+/* автопарковка */
+.btn.wide { display: block; width: 100%; margin-bottom: 8px; }
+.icon-btn.accent { color: #34d399; font-weight: 800; border-color: rgba(52,211,153,.45); }
+.icon-btn.small { width: 28px; height: 28px; font-size: 13px; border-radius: 8px; }
+#planCard {
+  position: absolute; left: 12px; top: 110px; width: 300px; max-height: calc(100% - 300px); overflow-y: auto;
+  background: rgba(22,24,28,.94); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.4);
+}
+.plan-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+#planInfo { margin: 4px 0 8px; }
+#planSteps { margin: 0 0 10px; padding-left: 22px; }
+.plan-actions { position: sticky; bottom: -10px; margin: 0 -12px -10px; padding: 8px 12px 10px; background: rgba(22,24,28,.98); }
+#planSteps li { padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,.05); }
+#planSteps li b { display: block; font-weight: 600; }
+#planSteps li span.fwd { color: var(--accent); }
+#planSteps li span.rev { color: var(--amber); }
+#planSteps li.on { color: #fff; }
+#planSteps li.on::marker { color: #34d399; font-weight: 800; }
+#planSteps li.done { opacity: .4; }
+#planCard.busy #planTitle::after {
+  content: ''; display: inline-block; width: 12px; height: 12px; margin-left: 8px; vertical-align: -1px;
+  border: 2px solid var(--accent); border-right-color: transparent; border-radius: 50%; animation: spin .8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+body.editing #planCard { display: none; }
 
 /* редактор */
 #editBar {
@@ -229,6 +258,7 @@ body.editing #hud, body.editing #stats, body.editing #controls { display: none; 
   .pedal { width: 80px; height: 52px; }
   #toast { bottom: 196px; }
   #editBar { right: 60px; }
+  #planCard { top: 96px; left: 8px; right: 60px; width: auto; max-height: 36vh; }
   .props { width: min(300px, 100%); }
 }
 @media (max-height: 560px) and (orientation: landscape) {
